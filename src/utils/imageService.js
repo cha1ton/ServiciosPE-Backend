@@ -1,3 +1,5 @@
+// backend/src/utils/imageService.js
+
 import sharp from 'sharp';
 
 export class ImageService {
