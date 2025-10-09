@@ -34,6 +34,8 @@ const serviceSchema = new mongoose.Schema(
       street: String,
       city: String,
       district: String,
+      formatted: String,   // ← nuevo
+      placeId: String,     // ← nuevo
       coordinates: {
         lat: Number,
         lng: Number,

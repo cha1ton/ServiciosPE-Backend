@@ -17,6 +17,8 @@ import serviceRoutes from './routes/services.js';
 dotenv.config();
 
 const app = express();
+console.log('Maps key cargada?:', !!process.env.GOOGLE_MAPS_API_KEY);
+
 
 // Conectar a MongoDB
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/serviciospe')
