@@ -66,3 +66,19 @@ export async function validateAndNormalizeLocation({ address, coordinates }) {
 
   return { ok: true, normalizedAddress, confidence: gc.confidence, distanceMeters };
 }
+
+export async function reverseGeocode(lat, lng) {
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${process.env.GOOGLE_MAPS_API_KEY}&result_type=street_address|route|sublocality|locality&language=es`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("Error llamando a Reverse Geocoding API");
+  const data = await resp.json();
+  if (data.status !== "OK") {
+    return { ok: false, reason: data.status, error_message: data.error_message };
+  }
+  const top = data.results[0];
+  return {
+    ok: true,
+    formattedAddress: top.formatted_address,
+    placeId: top.place_id,
+  };
+}

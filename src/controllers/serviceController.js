@@ -1,9 +1,16 @@
 // backend/src/controllers/serviceController.js
 
-import Service from "../models/Service.js";
+import Service from '../models/Service.js';
 import User from "../models/User.js";
 import { ImageService } from "../utils/imageService.js";
 import { validateAndNormalizeLocation } from "../utils/geocoding.js";
+import { reverseGeocode } from '../utils/geocoding.js';
+
+
+
+
+
+// ANTIGUO 
 
 export const createService = async (req, res) => {
   try {
@@ -77,48 +84,40 @@ export const createService = async (req, res) => {
       }
     }
 
-    // ✅ Validar/normalizar ubicación con Google
-    const validation = await validateAndNormalizeLocation({
-      address: parsedAddress,
-      coordinates: parsedCoordinates,
-    });
-
-    console.log("[Geo validation]", validation);
-
-    if (!validation.ok) {
-      const mapReasons = {
-        NO_RESULTS:
-          "No se encontró la dirección en Google Maps. Verifica calle y número.",
-        ZERO_RESULTS:
-          "No se encontró la dirección en Google Maps. Verifica calle y número.",
-        NOT_IN_PERU: "La dirección no pertenece a Perú.",
-        COORDINATES_MISMATCH:
-          "Las coordenadas no coinciden con la dirección (desviación > 150m).",
-        REQUEST_DENIED:
-          "Clave de Google inválida o restringida (revisa restricciones y APIs habilitadas).",
-        OVER_QUERY_LIMIT: "Se superó el límite de consultas a Google Maps.",
-        INVALID_REQUEST: "Solicitud inválida a Geocoding (faltan campos).",
-        UNKNOWN_ERROR: "Error temporal en Geocoding. Intenta de nuevo.",
-      };
+    // 1) Requerir coordenadas (pin)
+    if (!parsedCoordinates || parsedCoordinates.lat == null || parsedCoordinates.lng == null) {
       return res.status(400).json({
         success: false,
-        message:
-          mapReasons[validation.reason] ||
-          validation.error_message ||
-          "Ubicación inválida",
+        message: 'Selecciona la ubicación en el mapa'
       });
     }
 
-    // Usar la dirección normalizada (incluye formatted, placeId y coords confiables)
-    const addressDoc = validation.normalizedAddress;
+    // 2) Construir address con coords como verdad
+    const addressDoc = parsedAddress || {};
+    addressDoc.coordinates = {
+      lat: Number(parsedCoordinates.lat),
+      lng: Number(parsedCoordinates.lng)
+    };
 
+    // 3) (Opcional) Reverse geocoding para formatted/placeId (no bloqueante)
+    try {
+      const rev = await reverseGeocode(addressDoc.coordinates.lat, addressDoc.coordinates.lng);
+      if (rev.ok) {
+        addressDoc.formatted = rev.formattedAddress;
+        addressDoc.placeId = rev.placeId;
+      }
+    } catch (e) {
+      console.warn('[Reverse geocoding] falló; guardo solo coords');
+    }
+
+    // 4) Guardar
     const service = new Service({
-      ...serviceData,
+      ...serviceData,              // name, description, category
       owner: req.user._id,
       images: processedImages,
-      address: addressDoc,
+      address: addressDoc,         // ← coords (y formatted si hubo reverse)
       contact: parsedContact || undefined,
-      schedule: parsedSchedule,
+      schedule: parsedSchedule
     });
 
     await service.save();
