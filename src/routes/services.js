@@ -6,6 +6,7 @@ import { authenticateJWT } from '../middleware/auth.js';
 import { uploadMiddleware, validateImageCount } from '../middleware/upload.js';
 import { getMySingleService, updateMyService } from '../controllers/serviceEditController.js';
 import { validateImageCountOnUpdate } from '../middleware/uploadUpdate.js';
+import { searchServices } from '../controllers/searchController.js';
 
 const router = express.Router();
 
@@ -18,16 +19,16 @@ router.post('/',
 
 router.get('/my-services', authenticateJWT, getMyServices);
 
-// Obtener mi negocio (uno solo)
+// Obtener/editar mi negocio
 router.get('/my-service', authenticateJWT, getMySingleService);
-
-// Editar mi negocio (reemplazo opcional de imágenes)
-router.put(
-  '/my-service',
+router.put('/my-service',
   authenticateJWT,
-  uploadMiddleware,            // acepta hasta 3 archivos
-  validateImageCountOnUpdate,  // si manda imágenes, deben ser 3 para reemplazar
+  uploadMiddleware,
+  validateImageCountOnUpdate,
   updateMyService
 );
+
+// Búsqueda pública (no requiere auth)
+router.get('/search', searchServices);
 
 export default router;
