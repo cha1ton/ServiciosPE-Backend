@@ -2,7 +2,8 @@
 
 import express from 'express';
 import { createService, getMyServices } from '../controllers/serviceController.js';
-import { authenticateJWT } from '../middleware/auth.js';
+// agregando optionalAuth a la importacion
+import { authenticateJWT, optionalAuth } from '../middleware/auth.js';
 import { uploadMiddleware, validateImageCount } from '../middleware/upload.js';
 import { getMySingleService, updateMyService } from '../controllers/serviceEditController.js';
 import { validateImageCountOnUpdate } from '../middleware/uploadUpdate.js';
@@ -28,7 +29,7 @@ router.put('/my-service',
   updateMyService
 );
 
-// Búsqueda pública (no requiere auth)
-router.get('/search', searchServices);
+// 🔎 BÚSQUEDA COMBINADA (PÚBLICA O CON TOKEN)
+router.get('/search', optionalAuth, searchServices);
 
 export default router;

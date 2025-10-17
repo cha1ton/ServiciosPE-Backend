@@ -1,10 +1,11 @@
 // backend/src/controllers/searchController.js
 import Service from '../models/Service.js';
+import { nearbyPlaces, googlePhotoUrl } from '../utils/places.js';
 
 // Haversine en metros
 function distanceMeters(a, b) {
   const toRad = (x) => (x * Math.PI) / 180;
-  const R = 6371000; // radio Tierra
+  const R = 6371000;
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
@@ -15,35 +16,106 @@ function distanceMeters(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+// Normaliza nombre para comparar (rápido y suficiente)
+function normalizeName(s = '') {
+  return s
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quita tildes
+    .replace(/\b(s\.?a\.?c?|srl|s\.?r\.?l\.?|restaurant|restaurante|cafeteria|bodega|botica|clinica|centro|local)\b/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Similaridad de nombres simple (coeficiente de Jaccard por bigramas)
+function nameSimilarity(a, b) {
+  const nA = normalizeName(a), nB = normalizeName(b);
+  if (!nA || !nB) return 0;
+  const grams = (t) => {
+    const g = new Set();
+    const s = ` ${t} `;
+    for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2));
+    return g;
+  };
+  const A = grams(nA), B = grams(nB);
+  let inter = 0;
+  A.forEach(x => { if (B.has(x)) inter++; });
+  const union = A.size + B.size - inter;
+  return union ? inter / union : 0;
+}
+
 function isOpenNow(schedule, now = new Date()) {
-  if (!schedule) return true; // si no hay horario, no bloqueamos en MVP
-
-  // Día de la semana en inglés → tu schema está en español
+  if (!schedule) return true;
   const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-  const dayKey = days[now.getDay()];
-  const todays = schedule[dayKey];
-  if (!todays || !todays.open || !todays.close) return false;
-
-  // Asumimos horario local del servidor en formato HH:mm
-  const [oh, om] = todays.open.split(':').map(Number);
-  const [ch, cm] = todays.close.split(':').map(Number);
-
-  const openM = oh * 60 + om;
-  const closeM = ch * 60 + cm;
+  const k = days[now.getDay()];
+  const t = schedule[k];
+  if (!t || !t.open || !t.close) return false;
+  const toM = (hhmm) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
+  };
+  const openM = toM(t.open), closeM = toM(t.close);
   const curM = now.getHours() * 60 + now.getMinutes();
-
-  // No cubrimos horarios que cruzan medianoche en MVP (simple)
   return curM >= openM && curM <= closeM;
+}
+
+// Dedupe: misma ubicación (≤30 m) y nombre parecido (≥0.8)
+function dedupeMerge(center, localItems, googleItems, radius) {
+  const MAX_DIST_SAME = 30;     // metros
+  const NAME_SIMILAR = 0.8;
+
+  // Calcula distancias desde center
+  const withDist = (arr) => arr.map((x) => {
+    const d = distanceMeters(center, x.coordinates);
+    return { ...x, __distance: d };
+  });
+
+  const L = withDist(localItems);
+  const G = withDist(googleItems);
+
+  // Índice de locales por celda gruesa para acelerar (opcional simple)
+  // Aquí iremos directo por simplicidad: O(n*m) pero con radios chicos no molesta.
+
+  const takenGoogle = new Set();
+  const merged = [...L];
+
+  for (const g of G) {
+    // Solo consideramos g si está dentro del radio
+    if (g.__distance > radius) continue;
+
+    let duplicateOfLocal = false;
+    for (const l of L) {
+      const d = distanceMeters(l.coordinates, g.coordinates);
+      if (d <= MAX_DIST_SAME) {
+        const sim = nameSimilarity(l.name, g.name);
+        if (sim >= NAME_SIMILAR) {
+          duplicateOfLocal = true;
+          break;
+        }
+      }
+    }
+    if (!duplicateOfLocal) {
+      merged.push(g);
+      takenGoogle.add(g.placeId);
+    }
+  }
+
+  // Orden por distancia y retorno sin campos internos
+  return merged
+    .sort((a, b) => (a.__distance || 0) - (b.__distance || 0))
+    .map(({ __distance, ...rest }) => ({ ...rest, distanceMeters: Math.round(__distance || 0) }));
 }
 
 export const searchServices = async (req, res) => {
   try {
+    console.log('[SEARCH] q,lat,lng,radius,category,openNow:',
+      req.query.q, req.query.lat, req.query.lng, req.query.radius, req.query.category, req.query.openNow);
     const {
       lat, lng,
-      radius = 1000,               // en metros
-      category,                     // opcional
-      openNow: openNowFlag,         // "1" | "0"
-      q,                            // texto libre
+      radius = 500,
+      category,
+      openNow: openNowFlag,
+      q,
       page = 1,
       limit = 10
     } = req.query;
@@ -56,87 +128,106 @@ export const searchServices = async (req, res) => {
     const maxDist = Number(radius);
     const pageNum = Math.max(1, Number(page));
     const pageSize = Math.min(50, Math.max(1, Number(limit)));
+    const text = (q || '').trim().toLowerCase();
 
-    // Filtro base en memoria (solo activos)
+    // 1) Tus servicios (local DB)
     const base = { isActive: true };
     if (category) base.category = category;
-
-    // Traemos campos necesarios; evitamos enviar base64
     const docs = await Service.find(base)
       .select('name category address schedule rating contact images createdAt')
       .lean();
 
-    // Filtrado por texto (MVP simple: name/description no está seleccionado; usamos name)
-    const text = (q || '').trim().toLowerCase();
-    const filtered = docs.filter((s) => {
-      // Debe tener coords
-      const c = s?.address?.coordinates;
-      if (!c || typeof c.lat !== 'number' || typeof c.lng !== 'number') return false;
+    const locals = docs
+      .filter(s => s?.address?.coordinates && typeof s.address.coordinates.lat === 'number')
+      .filter(s => {
+        if (openNowFlag === '1' && !isOpenNow(s.schedule)) return false;
+        if (text) {
+          const hay = (s.name || '').toLowerCase().includes(text) ||
+            (s?.contact?.phone || '').toLowerCase().includes(text);
+          if (!hay) return false;
+        }
+        return true;
+      })
+      .map(s => {
+        const firstImg = s.images?.[0];
+        let image = '';
+        if (firstImg?.data) {
+          image = `data:image/${firstImg.format || 'jpeg'};base64,${firstImg.data}`;
+        }
+        return {
+          source: 'serviciospe',
+          id: String(s._id),
+          name: s.name,
+          category: s.category || 'otros',
+          coordinates: { lat: s.address.coordinates.lat, lng: s.address.coordinates.lng },
+          address: {
+            formatted: s.address?.formatted || '',
+            street: s.address?.street || '',
+            district: s.address?.district || '',
+            city: s.address?.city || '',
+          },
+          rating: s.rating || { average: 0, count: 0 },
+          contact: s.contact || {},
+          image,
+          createdAt: s.createdAt,
+        };
+      });
 
-      // Distancia
-      const d = distanceMeters(center, { lat: c.lat, lng: c.lng });
-      if (isFinite(maxDist) && d > maxDist) return false;
-
-      // Abierto ahora
-      if (openNowFlag === '1' && !isOpenNow(s.schedule)) return false;
-
-      // Texto
-      if (text) {
-        const hay =
-          (s.name || '').toLowerCase().includes(text) ||
-          (s?.contact?.phone || '').toLowerCase().includes(text);
-        if (!hay) return false;
-      }
-
-      // Guardo distancia calculada para ordenar
-      s.__distance = d;
-      return true;
+    // 2) Google Places (Nearby)
+    // Mapear 'category' opcional a un type simple (MVP)
+    const typeMap = {
+      restaurante: 'restaurant',
+      centro_salud: 'hospital',
+      lavanderia: 'laundry',   // puede no existir exacto; keyword fallback
+      farmacia: 'pharmacy',
+      supermercado: 'supermarket',
+      otros: ''
+    };
+    const type = category ? (typeMap[category] || '') : '';
+    const googleRaw = await nearbyPlaces({
+      lat: center.lat, lng: center.lng, radius: maxDist,
+      keyword: text || '', type
     });
 
-    // Orden: más cerca primero
-    filtered.sort((a, b) => (a.__distance || 0) - (b.__distance || 0));
+    const googleFiltered = googleRaw
+      .filter(g => g.coordinates?.lat != null && g.coordinates?.lng != null)
+      .filter(g => {
+        if (openNowFlag === '1' && g.openNow === false) return false;
+        return true;
+      })
+      // mapeo uniforme; la imagen será vía proxy si hay photoRef
+      .map(g => ({
+        source: 'google',
+        id: g.placeId,
+        name: g.name,
+        category: g.category || 'otros',
+        coordinates: g.coordinates,
+        address: g.address,
+        rating: g.rating,
+        contact: {},     // no exponemos phone/email de Google en Nearby
+        image: g.photoRef ? `/api/places/photo?ref=${encodeURIComponent(g.photoRef)}&maxwidth=400` : '',
+        createdAt: undefined,
+      }));
 
-    // Paginación
-    const total = filtered.length;
+    // 3) Merge + dedupe
+    const merged = dedupeMerge(center, locals, googleFiltered, maxDist);
+
+    // 4) Paginación
+    const total = merged.length;
     const start = (pageNum - 1) * pageSize;
     const end = start + pageSize;
-    const pageItems = filtered.slice(start, end);
+    const pageItems = merged.slice(start, end);
 
-    // Mapeo de respuesta (miniatura de imagen si hay)
-    const results = pageItems.map((s) => {
-      const firstImg = s.images?.[0];
-      let thumb = '';
-      if (firstImg?.data) {
-        thumb = `data:image/${firstImg.format || 'jpeg'};base64,${firstImg.data}`;
-      }
-      return {
-        id: s._id,
-        name: s.name,
-        category: s.category,
-        distanceMeters: Math.round(s.__distance || 0),
-        coordinates: s.address?.coordinates,
-        address: {
-          formatted: s.address?.formatted || '',
-          street: s.address?.street || '',
-          district: s.address?.district || '',
-          city: s.address?.city || '',
-        },
-        rating: s.rating || { average: 0, count: 0 },
-        contact: s.contact || {},
-        image: thumb, // opcional
-        createdAt: s.createdAt,
-      };
-    });
-
-    res.json({
+    return res.json({
       success: true,
       total,
       page: pageNum,
       limit: pageSize,
-      results
+      results: pageItems
     });
+
   } catch (e) {
-    console.error('Error en búsqueda:', e);
-    res.status(500).json({ success: false, message: 'Error en búsqueda' });
+    console.error('Error en búsqueda combinada:', e);
+    return res.status(500).json({ success: false, message: 'Error en búsqueda' });
   }
 };

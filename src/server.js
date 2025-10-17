@@ -8,10 +8,9 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import passport from './config/passport.js';
-
-// Importar rutas
 import authRoutes from './routes/auth.js';
 import serviceRoutes from './routes/services.js';
+import placesRoutes from './routes/places.js';
 
 // Configurar variables de entorno
 dotenv.config();
@@ -26,7 +25,26 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/servicios
   .catch(err => console.error('Error conectando a MongoDB:', err));
 
 // Middleware de seguridad
-app.use(helmet());
+// app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      // Lo demás queda con defaults
+      "img-src": [
+        "'self'",
+        "data:",
+        // Google Place Photos redirige a lh3.googleusercontent.com
+        "https://*.googleusercontent.com",
+        // Íconos/recursos de maps
+        "https://maps.googleapis.com",
+        "https://maps.gstatic.com"
+      ],
+    },
+  },
+}));
+
+app.use(helmet.crossOriginResourcePolicy({ policy: "cross-origin" }));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -40,6 +58,8 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
 }));
+
+app.use('/api/places', placesRoutes);
 
 // AGREGAR LÍMITES - IMPORTANTE
 app.use(express.json({ limit: '1mb' }));
