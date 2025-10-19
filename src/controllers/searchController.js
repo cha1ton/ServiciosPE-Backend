@@ -189,13 +189,13 @@ export const searchServices = async (req, res) => {
       keyword: text || '', type
     });
 
+    //Cambiamos esto:
     const googleFiltered = googleRaw
       .filter(g => g.coordinates?.lat != null && g.coordinates?.lng != null)
       .filter(g => {
         if (openNowFlag === '1' && g.openNow === false) return false;
         return true;
       })
-      // mapeo uniforme; la imagen será vía proxy si hay photoRef
       .map(g => ({
         source: 'google',
         id: g.placeId,
@@ -204,10 +204,11 @@ export const searchServices = async (req, res) => {
         coordinates: g.coordinates,
         address: g.address,
         rating: g.rating,
-        contact: {},     // no exponemos phone/email de Google en Nearby
-        image: g.photoRef ? `/api/places/photo?ref=${encodeURIComponent(g.photoRef)}&maxwidth=400` : '',
+        contact: {}, // no exponemos phone/email de Google en Nearby
+        // ⬇️ aquí el cambio: URL directa a Google Photos API
+        image: g.photoRef ? googlePhotoUrl({ photoRef: g.photoRef, maxwidth: 400 }) : '',
         createdAt: undefined,
-      }));
+    }));
 
     // 3) Merge + dedupe
     const merged = dedupeMerge(center, locals, googleFiltered, maxDist);
