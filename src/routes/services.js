@@ -1,7 +1,7 @@
 // backend/src/routes/services.js
 
 import express from 'express';
-import { createService, getMyServices } from '../controllers/serviceController.js';
+import { createService, getMyServices, getServicePublic } from '../controllers/serviceController.js';
 // agregando optionalAuth a la importacion
 import { authenticateJWT, optionalAuth } from '../middleware/auth.js';
 import { uploadMiddleware, validateImageCount } from '../middleware/upload.js';
@@ -32,4 +32,6 @@ router.put('/my-service',
 // 🔎 BÚSQUEDA COMBINADA (PÚBLICA O CON TOKEN)
 router.get('/search', optionalAuth, searchServices);
 
+// 👇 Detalle público por ID (sin auth)
+router.get('/:id', getServicePublic);
 export default router;

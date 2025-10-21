@@ -6,10 +6,6 @@ import { ImageService } from "../utils/imageService.js";
 import { validateAndNormalizeLocation } from "../utils/geocoding.js";
 import { reverseGeocode } from '../utils/geocoding.js';
 
-
-
-
-
 // ANTIGUO 
 
 export const createService = async (req, res) => {
@@ -162,6 +158,53 @@ export const getMyServices = async (req, res) => {
       success: false,
       message: "Error al obtener servicios",
     });
+  }
+};
+
+export const getServicePublic = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const svc = await Service.findById(id)
+      .select('name description category address rating contact images createdAt')
+      .lean();
+
+    if (!svc) {
+      return res.status(404).json({ success: false, message: 'Servicio no encontrado' });
+    }
+
+    // Normaliza imágenes a data URL (MVP)
+    const images = (svc.images || []).map(img => ({
+      url: img?.data ? `data:image/${img.format || 'jpeg'};base64,${img.data}` : '',
+      format: img.format,
+      size: img.size,
+      originalName: img.originalName,
+      uploadedAt: img.uploadedAt,
+    }));
+
+    return res.json({
+      success: true,
+      service: {
+        id: String(svc._id),
+        name: svc.name,
+        description: svc.description || '',
+        category: svc.category || 'otros',
+        address: {
+          formatted: svc.address?.formatted || '',
+          street: svc.address?.street || '',
+          district: svc.address?.district || '',
+          city: svc.address?.city || '',
+          coordinates: svc.address?.coordinates || null,
+        },
+        rating: svc.rating || { average: 0, count: 0 },
+        contact: svc.contact || {},
+        images,
+        createdAt: svc.createdAt,
+      }
+    });
+  } catch (e) {
+    console.error('Error obteniendo servicio público:', e);
+    return res.status(500).json({ success: false, message: 'Error obteniendo servicio' });
   }
 };
 
