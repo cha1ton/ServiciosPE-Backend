@@ -166,7 +166,7 @@ export const getServicePublic = async (req, res) => {
     const { id } = req.params;
 
     const svc = await Service.findById(id)
-      .select('name description category address rating contact images createdAt')
+      .select('name description category address rating contact images schedule createdAt')
       .lean();
 
     if (!svc) {
@@ -199,6 +199,7 @@ export const getServicePublic = async (req, res) => {
         rating: svc.rating || { average: 0, count: 0 },
         contact: svc.contact || {},
         images,
+        schedule: svc.schedule || null,
         createdAt: svc.createdAt,
       }
     });
