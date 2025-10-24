@@ -13,6 +13,7 @@ import serviceRoutes from './routes/services.js';
 import placesRoutes from './routes/places.js';
 import userRoutes from './routes/user.js';
 import reviewsRoutes from './routes/reviews.js';
+import aiRoutes from './routes/ai.js';
 
 // Configurar variables de entorno
 dotenv.config();
@@ -86,9 +87,11 @@ app.use(passport.session());
 app.use('/api/auth', authRoutes);
 app.use('/api/services', serviceRoutes);
 
-//...19-10-25  22:22
 app.use('/api/user', userRoutes);
 app.use('/api/reviews', reviewsRoutes);
+
+// 24-10-25  13:20
+app.use('/api/ai', aiRoutes);
 
 // Ruta de salud
 app.get('/api/health', (req, res) => {
