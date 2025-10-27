@@ -27,6 +27,49 @@ function normalizeName(s = '') {
     .trim();
 }
 
+// Normalización básica para búsqueda (tokens + pseudo-stemming liviano)
+function normalizeText(s = '') {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokensFrom(text = '') {
+  const base = normalizeText(text).split(' ').filter(Boolean);
+  // stemming muy simple en español
+  return base.map(t => t
+    .replace(/(mente|mente$)/, '')
+    .replace(/(aciones|acion|adora|adores|ador|adoras|ados|adas|ado|ada)$/,'')
+    .replace(/(amientos|amiento|imiento|iciones|icion)$/,'')
+    .replace(/(mente|idad|idades|ismo|ista|istas)$/,'')
+    .replace(/(ando|iendo|arar|erar|irar|ar|er|ir)$/,'')
+    .replace(/(es|s)$/,'')
+  );
+}
+
+const CATEGORY_SYNONYMS = {
+  restaurante: ['restaurante','comer','almorzar','cena','cenar','menú','menu','polleria','pollerias','parrilla','comida','cocina','almuerzo','cena','resto','trattoria'],
+  centro_salud: ['salud','clinica','clínica','hospital','doctor','medico','médico','odontologia','dentista','botica','farmacia'],
+  lavanderia: ['lavanderia','lavado','ropa','seco','tintoreria'],
+  farmacia: ['farmacia','botica','medicina','medicinas','boticas','farmacias'],
+  supermercado: ['supermercado','bodega','tienda','mercado','minimarket','mini market','abarrotes'],
+  hotel: ['hotel','hostal','hospedaje','alojamiento','noche','dormir','habitacion','habitaciones','motel','posada'],
+  baile: ['baile','bailar','danza','salsa','bachata','escuela','academia','clases','discoteca','night club','club nocturno']
+};
+
+function inferCategoryFromQuery(q = '') {
+  const qn = normalizeText(q);
+  for (const [cat, syns] of Object.entries(CATEGORY_SYNONYMS)) {
+    for (const s of syns) {
+      if (qn.includes(normalizeText(s))) return cat;
+    }
+  }
+  return '';
+}
+
 // Similaridad de nombres simple (coeficiente de Jaccard por bigramas)
 function nameSimilarity(a, b) {
   const nA = normalizeName(a), nB = normalizeName(b);
@@ -128,11 +171,14 @@ export const searchServices = async (req, res) => {
     const maxDist = Number(radius);
     const pageNum = Math.max(1, Number(page));
     const pageSize = Math.min(50, Math.max(1, Number(limit)));
-    const text = (q || '').trim().toLowerCase();
+    const text = (q || '').trim();
+    const qTokens = tokensFrom(text);
+    const inferredCat = !category ? inferCategoryFromQuery(text) : '';
 
     // 1) Tus servicios (local DB)
     const base = { isActive: true };
-    if (category) base.category = category;
+    const effectiveCategory = category || (inferredCat && ['restaurante','centro_salud','lavanderia','farmacia','supermercado'].includes(inferredCat) ? inferredCat : '');
+    if (effectiveCategory) base.category = effectiveCategory;
     const docs = await Service.find(base)
       .select('name category address schedule rating contact images createdAt')
       .lean();
@@ -141,12 +187,29 @@ export const searchServices = async (req, res) => {
       .filter(s => s?.address?.coordinates && typeof s.address.coordinates.lat === 'number')
       .filter(s => {
         if (openNowFlag === '1' && !isOpenNow(s.schedule)) return false;
-        if (text) {
-          const hay = (s.name || '').toLowerCase().includes(text) ||
-            (s?.contact?.phone || '').toLowerCase().includes(text);
-          if (!hay) return false;
+        if (!text) return true;
+        const haystack = normalizeText([
+          s.name,
+          s.description,
+          s?.address?.formatted,
+          s?.address?.street,
+          s?.address?.district,
+          s?.address?.city,
+          s.category,
+        ].filter(Boolean).join(' '));
+        const tokens = new Set(tokensFrom(haystack));
+        // match por tokens o por sinónimos de categorías
+        const tokenHit = qTokens.some(t => tokens.has(t));
+        let synonymHit = false;
+        for (const [cat, syns] of Object.entries(CATEGORY_SYNONYMS)) {
+          if (syns.some(w => haystack.includes(normalizeText(w))) && (!effectiveCategory || effectiveCategory === cat || s.category === cat)) {
+            // si el query menciona palabras de esta categoría, considéralo match
+            if (qTokens.some(t => syns.map(normalizeText).some(sw => sw.includes(t) || t.includes(sw)))) {
+              synonymHit = true; break;
+            }
+          }
         }
-        return true;
+        return tokenHit || synonymHit;
       })
       .map(s => {
         const firstImg = s.images?.[0];
@@ -181,9 +244,11 @@ export const searchServices = async (req, res) => {
       lavanderia: 'laundry',   // puede no existir exacto; keyword fallback
       farmacia: 'pharmacy',
       supermercado: 'supermarket',
+      hotel: 'lodging',
+      baile: 'night_club',
       otros: ''
     };
-    const type = category ? (typeMap[category] || '') : '';
+    const type = (effectiveCategory ? (typeMap[effectiveCategory] || '') : (inferredCat ? (typeMap[inferredCat] || '') : ''));
     const googleRaw = await nearbyPlaces({
       lat: center.lat, lng: center.lng, radius: maxDist,
       keyword: text || '', type
