@@ -18,10 +18,20 @@ const serviceSchema = new mongoose.Schema(
       required: true,
       enum: [
         "restaurante",
+        "comida_bebidas",
         "centro_salud",
-        "lavanderia",
         "farmacia",
+        "veterinaria",
+        "minimarket",
         "supermercado",
+        "hotel",
+        "gimnasio",
+        "escuela_baile",
+        "taller_mecanico",
+        "lavanderia",
+        "barberia",
+        "salon_belleza",
+        "discoteca",
         "otros",
       ],
     },
@@ -34,8 +44,9 @@ const serviceSchema = new mongoose.Schema(
       street: String,
       city: String,
       district: String,
-      formatted: String,   // ← nuevo
-      placeId: String,     // ← nuevo
+      reference: String,
+      formatted: String, 
+      placeId: String,    
       coordinates: {
         lat: Number,
         lng: Number,
@@ -46,6 +57,8 @@ const serviceSchema = new mongoose.Schema(
       email: String,
       website: String,
     },
+    // Nuevo: descripción corta de lo que ofrece (para mejorar búsqueda)
+    offerings: { type: String, default: "" },
     schedule: {
       monday: { open: String, close: String },
       tuesday: { open: String, close: String },

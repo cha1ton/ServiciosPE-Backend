@@ -51,13 +51,72 @@ function tokensFrom(text = '') {
 }
 
 const CATEGORY_SYNONYMS = {
-  restaurante: ['restaurante','comer','almorzar','cena','cenar','menú','menu','polleria','pollerias','parrilla','comida','cocina','almuerzo','cena','resto','trattoria'],
-  centro_salud: ['salud','clinica','clínica','hospital','doctor','medico','médico','odontologia','dentista','botica','farmacia'],
-  lavanderia: ['lavanderia','lavado','ropa','seco','tintoreria'],
-  farmacia: ['farmacia','botica','medicina','medicinas','boticas','farmacias'],
-  supermercado: ['supermercado','bodega','tienda','mercado','minimarket','mini market','abarrotes'],
-  hotel: ['hotel','hostal','hospedaje','alojamiento','noche','dormir','habitacion','habitaciones','motel','posada'],
-  baile: ['baile','bailar','danza','salsa','bachata','escuela','academia','clases','discoteca','night club','club nocturno']
+  restaurante: [
+    'restaurante', 'restaurantes', 'comer', 'almorzar', 'cena', 'cenar',
+    'menú', 'menu', 'polleria', 'pollerías', 'parrilla', 'cevicheria',
+    'cevichería', 'comida', 'cocina', 'almuerzo', 'trattoria', 'sangucheria', 'sanguchería'
+  ],
+  comida_bebidas: [
+    'cafetería', 'cafeteria', 'café', 'panadería', 'panaderia', 'pastelería',
+    'pasteleria', 'postres', 'jugueria', 'juguería', 'heladería', 'heladeria',
+    'dulces', 'repostería', 'reposteria', 'coffee', 'bakery'
+  ],
+  centro_salud: [
+    'salud', 'clinica', 'clínica', 'hospital', 'doctor', 'doctora', 'médico',
+    'medico', 'odontologia', 'odontología', 'dentista', 'psicologo', 'psicóloga',
+    'terapia', 'consultorio', 'fisioterapia', 'laboratorio'
+  ],
+  farmacia: [
+    'farmacia', 'botica', 'medicina', 'medicinas','medicamento','medicamentos', 'boticas', 'farmacias',
+    'remedios', 'farmacéutica', 'farmaceutica'
+  ],
+  veterinaria: [
+    'veterinaria', 'vet', 'mascotas', 'perros', 'gatos', 'animal', 'animales',
+    'pet shop', 'clínica veterinaria'
+  ],
+  minimarket: [
+    'minimarket', 'mini market', 'tienda', 'bodega', 'abarrotes', 'mercadito',
+    'kiosko', 'colmado', 'market', 'mini'
+  ],
+  supermercado: [
+    'supermercado', 'super', 'mercado', 'plaza vea', 'tottus', 'metro', 'wong',
+    'makro', 'hipermercado', 'centro comercial'
+  ],
+  hotel: [
+    'hotel', 'hostal', 'hospedaje', 'alojamiento', 'motel', 'posada', 'habitacion',
+    'habitaciones', 'noche', 'dormir', 'suite', 'residencial'
+  ],
+  gimnasio: [
+    'gimnasio', 'gym', 'crossfit', 'pesas', 'entrenamiento','entrenar', 'fitness',
+    'deporte', 'ejercicio', 'musculacion', 'musculación', 'rutina'
+  ],
+  escuela_baile: [
+    'baile', 'bailar', 'danza', 'salsa', 'bachata', 'escuela', 'academia',
+    'clases de baile', 'coreografía', 'taller de baile'
+  ],
+  taller_mecanico: [
+    'taller', 'mecanico', 'mecánico', 'autos', 'carros', 'vehículos', 'motor',
+    'frenos', 'aceite', 'automotriz', 'servicio técnico', 'reparación de autos'
+  ],
+  lavanderia: [
+    'lavanderia', 'lavandería', 'lavado', 'ropa', 'planchado', 'tintoreria',
+    'tintorería', 'seco', 'servicio de lavado'
+  ],
+  barberia: [
+    'barbería', 'barberia', 'barbero', 'corte de cabello', 'afeitado', 'peluquería masculina',
+    'peinado', 'cabello hombres', 'barba', 'look', 'haircut'
+  ],
+  salon_belleza: [
+    'salón de belleza', 'salon de belleza', 'peluquería', 'spa', 'manicure', 'pedicure',
+    'maquillaje', 'peinado', 'alisado', 'tinte', 'uñas', 'tratamiento capilar'
+  ],
+  discoteca: [
+    'discoteca', 'discotecas', 'bar', 'pub', 'club', 'night club', 'club nocturno',
+    'fiesta', 'nocturno', 'antro', 'karaoke'
+  ],
+  otros: [
+    'servicio', 'negocio', 'empresa', 'local', 'tienda', 'oficina'
+  ]
 };
 
 function inferCategoryFromQuery(q = '') {
@@ -145,8 +204,14 @@ function dedupeMerge(center, localItems, googleItems, radius) {
 
   // Orden por distancia y retorno sin campos internos
   return merged
-    .sort((a, b) => (a.__distance || 0) - (b.__distance || 0))
-    .map(({ __distance, ...rest }) => ({ ...rest, distanceMeters: Math.round(__distance || 0) }));
+    .sort((a, b) =>
+      (a.__boost || 0) - (b.__boost || 0) ||  // 1º: más NEGATIVO primero (más similar)
+      (a.__distance || 0) - (b.__distance || 0) // 2º: luego por cercanía
+    )
+    .map(({ __distance, __boost, ...rest }) => ({
+      ...rest,
+      distanceMeters: Math.round(__distance || 0),
+    }));
 }
 
 export const searchServices = async (req, res) => {
@@ -177,12 +242,18 @@ export const searchServices = async (req, res) => {
 
     // 1) Tus servicios (local DB)
     const base = { isActive: true };
-    const effectiveCategory = category || (inferredCat && ['restaurante','centro_salud','lavanderia','farmacia','supermercado'].includes(inferredCat) ? inferredCat : '');
+    const effectiveCategory = category || (
+      inferredCat && ['restaurante','comida_bebidas','centro_salud','farmacia',
+        'veterinaria','minimarket','supermercado','hotel','gimnasio','escuela_baile',
+        'taller_mecanico','lavanderia','barberia','salon_belleza','discoteca','otros',
+      ].includes(inferredCat) ? inferredCat : ''
+    );
+    
     if (effectiveCategory) base.category = effectiveCategory;
     const docs = await Service.find(base)
       .select('name category address schedule rating contact images createdAt')
       .lean();
-
+    const queryNameNorm = normalizeName(text);
     const locals = docs
       .filter(s => s?.address?.coordinates && typeof s.address.coordinates.lat === 'number')
       .filter(s => {
@@ -191,6 +262,7 @@ export const searchServices = async (req, res) => {
         const haystack = normalizeText([
           s.name,
           s.description,
+          s.offerings,
           s?.address?.formatted,
           s?.address?.street,
           s?.address?.district,
@@ -217,6 +289,17 @@ export const searchServices = async (req, res) => {
         if (firstImg?.data) {
           image = `data:image/${firstImg.format || 'jpeg'};base64,${firstImg.data}`;
         }
+
+        // 🟢 BOOST por parecido de nombre (cuando hay q)
+        let __boost = 0;
+        if (queryNameNorm) {
+          const sim = nameSimilarity(s.name, text); // usa el texto original del usuario
+          // Si sim >= 0.60 (tolerante a 1–2 typos), empuja hacia arriba.
+          if (sim >= 0.60) {
+            __boost = -Math.round(sim * 1000); // p.ej., sim 0.86 => -860
+          }
+        }
+
         return {
           source: 'serviciospe',
           id: String(s._id),
@@ -233,6 +316,7 @@ export const searchServices = async (req, res) => {
           contact: s.contact || {},
           image,
           createdAt: s.createdAt,
+          __boost,
         };
       });
 
@@ -240,14 +324,23 @@ export const searchServices = async (req, res) => {
     // Mapear 'category' opcional a un type simple (MVP)
     const typeMap = {
       restaurante: 'restaurant',
+      comida_bebidas: 'cafe',       // o 'bakery' según preferencia (puedes alternar con keyword)
       centro_salud: 'hospital',
-      lavanderia: 'laundry',   // puede no existir exacto; keyword fallback
       farmacia: 'pharmacy',
+      veterinaria: 'veterinary_care',
+      minimarket: '',               // Google no tiene 'minimarket'; usa keyword fallback
       supermercado: 'supermarket',
       hotel: 'lodging',
-      baile: 'night_club',
+      gimnasio: 'gym',
+      escuela_baile: 'school',      // y apoya con keyword "dance"
+      taller_mecanico: 'car_repair',
+      lavanderia: 'laundry',
+      barberia: 'hair_care',
+      salon_belleza: 'beauty_salon',
+      discoteca: 'night_club',
       otros: ''
     };
+
     const type = (effectiveCategory ? (typeMap[effectiveCategory] || '') : (inferredCat ? (typeMap[inferredCat] || '') : ''));
     const googleRaw = await nearbyPlaces({
       lat: center.lat, lng: center.lng, radius: maxDist,

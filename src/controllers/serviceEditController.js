@@ -66,6 +66,7 @@ export const updateMyService = async (req, res) => {
     if (req.body.name)        service.name = req.body.name;
     if (req.body.description) service.description = req.body.description;
     if (req.body.category)    service.category = req.body.category;
+    if (req.body.offerings !== undefined) service.offerings = req.body.offerings;
 
     if (parsedContact) {
       service.contact = { ...service.contact, ...pruneEmptyStrings(parsedContact) };
