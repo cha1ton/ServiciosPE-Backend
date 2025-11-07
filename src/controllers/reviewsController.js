@@ -21,6 +21,15 @@ export const listReviews = async (req, res) => {
       canReply = !!(svc && String(svc.owner) === String(req.user._id));
     }
 
+    // Si el visitante es el dueño, marcar reseñas como vistas por el owner
+    if (canReply) {
+      try {
+        await Review.updateMany({ service: serviceId, ownerSeen: false }, { $set: { ownerSeen: true } });
+      } catch (e) {
+        console.error('Error marcando ownerSeen:', e);
+      }
+    }
+
     return res.json({
       success: true,
       reviews,
@@ -98,8 +107,8 @@ export const replyToReview = async (req, res) => {
     const windowMs = REPLY_EDIT_WINDOW_MIN * 60 * 1000;
 
     if (!review.ownerReply) {
-      // Crear respuesta
-      review.ownerReply = { text, createdAt: now, updatedAt: now };
+      // Crear respuesta (marcar como NO leída por el autor)
+      review.ownerReply = { text, createdAt: now, updatedAt: now, read: false };
     } else {
       // Editar: solo dentro de la ventana
       const diff = now - new Date(review.ownerReply.createdAt);
@@ -111,6 +120,8 @@ export const replyToReview = async (req, res) => {
       }
       review.ownerReply.text = text;
       review.ownerReply.updatedAt = now;
+      // Si el dueño edita la respuesta, volver a marcar como no leída
+      review.ownerReply.read = false;
     }
 
     await review.save();
@@ -124,5 +135,114 @@ export const replyToReview = async (req, res) => {
     });
   } catch {
     return res.status(500).json({ success: false, message: 'Error al responder reseña' });
+  }
+};
+
+// Obtener respuestas no leídas para el usuario (author)
+export const getUnreadReplies = async (req, res) => {
+  try {
+    // Guardia defensiva: si no hay usuario, responder 401
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Autenticación requerida' });
+    }
+
+    const userId = req.user._id;
+    console.log('GET /api/reviews/unread - user:', String(userId));
+
+    // 1) Notificaciones para el autor: respuestas no leídas
+    const authorReviews = await Review.find({
+      author: userId,
+      'ownerReply.read': false,
+      'ownerReply.text': { $exists: true }
+    })
+      .sort({ 'ownerReply.createdAt': -1 })
+      .populate('service', 'name')
+      .lean();
+
+    // 2) Notificaciones para el owner: nuevas reseñas en sus servicios
+    const servicesOwned = await Service.find({ owner: userId }).select('_id name').lean();
+    const serviceIds = servicesOwned.map(s => s._id);
+
+    const ownerReviews = serviceIds.length > 0 ? await Review.find({
+      service: { $in: serviceIds },
+      ownerSeen: false
+    })
+      .sort({ createdAt: -1 })
+      .populate('service', 'name')
+      .populate('author', 'nickname name')
+      .lean() : [];
+
+    console.log('GET /api/reviews/unread - author count:', authorReviews.length, 'owner count:', ownerReviews.length);
+
+    const authorItems = authorReviews.map(r => ({
+      type: 'owner_reply',
+      reviewId: r._id,
+      serviceId: r.service?._id || null,
+      serviceTitle: r.service?.name || '',
+      ownerReply: r.ownerReply,
+      comment: r.comment,
+      createdAt: r.createdAt,
+    }));
+
+    const ownerItems = ownerReviews.map(r => ({
+      type: 'new_review',
+      reviewId: r._id,
+      serviceId: r.service?._id || null,
+      serviceTitle: r.service?.name || '',
+      authorName: r.author?.nickname || r.author?.name || 'Alguien',
+      comment: r.comment,
+      createdAt: r.createdAt,
+    }));
+
+    const items = [...authorItems, ...ownerItems];
+    return res.json({ success: true, items, count: items.length });
+  } catch (err) {
+    console.error('Error getting unread replies:', err);
+    // En desarrollo, devolver el mensaje de error para facilitar debugging
+    const payload = { success: false, message: 'Error al obtener respuestas no leídas' };
+    if (process.env.NODE_ENV !== 'production' && err && err.message) payload.error = err.message;
+    return res.status(500).json(payload);
+  }
+};
+
+// Marcar la respuesta como leída por el autor
+export const markReplyRead = async (req, res) => {
+  try {
+    const { reviewId } = req.params;
+    const userId = req.user._id;
+
+    const review = await Review.findOne({ _id: reviewId, author: userId });
+    if (!review || !review.ownerReply) return res.status(404).json({ success: false, message: 'Reseña o respuesta no encontrada' });
+
+    review.ownerReply.read = true;
+    await review.save();
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Error marking reply read:', err);
+    return res.status(500).json({ success: false, message: 'Error al marcar como leída' });
+  }
+};
+
+// Marcar reseña como vista por el owner
+export const markOwnerSeen = async (req, res) => {
+  try {
+    const { reviewId } = req.params;
+    const userId = req.user._id;
+
+    const review = await Review.findById(reviewId).populate('service', 'owner').exec();
+    if (!review) return res.status(404).json({ success: false, message: 'Reseña no encontrada' });
+
+    if (!review.service || String(review.service.owner) !== String(userId)) {
+      return res.status(403).json({ success: false, message: 'No autorizado' });
+    }
+
+    review.ownerSeen = true;
+    await review.save();
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Error marking owner seen:', err);
+    return res.status(500).json({ success: false, message: 'Error al marcar como vista' });
   }
 };
