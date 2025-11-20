@@ -74,13 +74,11 @@ const CATEGORY_SYNONYMS = {
     'veterinaria', 'vet', 'mascotas', 'perros', 'gatos', 'animal', 'animales',
     'pet shop', 'clínica veterinaria'
   ],
-  minimarket: [
-    'minimarket', 'mini market', 'tienda', 'bodega', 'abarrotes', 'mercadito',
-    'kiosko', 'colmado', 'market', 'mini'
-  ],
   supermercado: [
     'supermercado', 'super', 'mercado', 'plaza vea', 'tottus', 'metro', 'wong',
-    'makro', 'hipermercado', 'centro comercial'
+    'makro', 'hipermercado', 'centro comercial',
+    'minimarket', 'mini market', 'tienda', 'bodega', 'abarrotes', 'mercadito',
+    'kiosko', 'colmado', 'market', 'mini', 'tambo', 'oxxo', 'mass'
   ],
   hotel: [
     'hotel', 'hostal', 'hospedaje', 'alojamiento', 'motel', 'posada', 'habitacion',
@@ -175,14 +173,10 @@ function dedupeMerge(center, localItems, googleItems, radius) {
   const L = withDist(localItems);
   const G = withDist(googleItems);
 
-  // Índice de locales por celda gruesa para acelerar (opcional simple)
-  // Aquí iremos directo por simplicidad: O(n*m) pero con radios chicos no molesta.
-
   const takenGoogle = new Set();
   const merged = [...L];
 
   for (const g of G) {
-    // Solo consideramos g si está dentro del radio
     if (g.__distance > radius) continue;
 
     let duplicateOfLocal = false;
@@ -240,16 +234,19 @@ export const searchServices = async (req, res) => {
     const qTokens = tokensFrom(text);
     const inferredCat = !category ? inferCategoryFromQuery(text) : '';
 
-    // 1) Tus servicios (local DB)
-    const base = { isActive: true };
+    // 1) Determinar categoría efectiva UNA VEZ
     const effectiveCategory = category || (
       inferredCat && ['restaurante','comida_bebidas','centro_salud','farmacia',
-        'veterinaria','minimarket','supermercado','hotel','gimnasio','escuela_baile',
+        'veterinaria','supermercado','hotel','gimnasio','escuela_baile',
         'taller_mecanico','lavanderia','barberia','salon_belleza','discoteca','otros',
       ].includes(inferredCat) ? inferredCat : ''
     );
+
     
+    // 2) Tus servicios (local DB)
+    const base = { isActive: true };
     if (effectiveCategory) base.category = effectiveCategory;
+
     const docs = await Service.find(base)
       .select('name category address schedule rating contact images createdAt')
       .lean();
@@ -320,19 +317,18 @@ export const searchServices = async (req, res) => {
         };
       });
 
-    // 2) Google Places (Nearby)
+    // 3) Google Places (Nearby)
     // Mapear 'category' opcional a un type simple (MVP)
     const typeMap = {
       restaurante: 'restaurant',
-      comida_bebidas: 'cafe',       // o 'bakery' según preferencia (puedes alternar con keyword)
+      comida_bebidas: 'cafe',
       centro_salud: 'hospital',
       farmacia: 'pharmacy',
       veterinaria: 'veterinary_care',
-      minimarket: '',               // Google no tiene 'minimarket'; usa keyword fallback
-      supermercado: 'supermarket',
+      supermercado: 'supermarket', // manejado aparte con convenience_store
       hotel: 'lodging',
       gimnasio: 'gym',
-      escuela_baile: 'school',      // y apoya con keyword "dance"
+      escuela_baile: 'school',
       taller_mecanico: 'car_repair',
       lavanderia: 'laundry',
       barberia: 'hair_care',
@@ -341,13 +337,22 @@ export const searchServices = async (req, res) => {
       otros: ''
     };
 
-    const type = (effectiveCategory ? (typeMap[effectiveCategory] || '') : (inferredCat ? (typeMap[inferredCat] || '') : ''));
-    const googleRaw = await nearbyPlaces({
-      lat: center.lat, lng: center.lng, radius: maxDist,
-      keyword: text || '', type
-    });
+    let googleRaw = [];
+    if (effectiveCategory === 'supermercado') {
+      const common = { lat: center.lat, lng: center.lng, radius: maxDist, keyword: text || '' };
+      const [superm, conv] = await Promise.all([
+        nearbyPlaces({ ...common, type: 'supermarket' }),
+        nearbyPlaces({ ...common, type: 'convenience_store' }),
+      ]);
+      googleRaw = [...superm, ...conv];
+    } else {
+      const type = effectiveCategory ? (typeMap[effectiveCategory] || '') :
+                  (inferredCat ? (typeMap[inferredCat] || '') : '');
+      googleRaw = await nearbyPlaces({
+        lat: center.lat, lng: center.lng, radius: maxDist, keyword: text || '', type
+      });
+    }
 
-    //Cambiamos esto:
     const googleFiltered = googleRaw
       .filter(g => g.coordinates?.lat != null && g.coordinates?.lng != null)
       .filter(g => {
@@ -365,13 +370,12 @@ export const searchServices = async (req, res) => {
         contact: {}, // no exponemos phone/email de Google en Nearby
         // ⬇️ aquí el cambio: URL directa a Google Photos API
         image: g.photoRef ? googlePhotoUrl({ photoRef: g.photoRef, maxwidth: 400 }) : '',
-        createdAt: undefined,
     }));
 
-    // 3) Merge + dedupe
+    // 4) Merge + dedupe
     const merged = dedupeMerge(center, locals, googleFiltered, maxDist);
 
-    // 4) Paginación
+    // 5) Paginación
     const total = merged.length;
     const start = (pageNum - 1) * pageSize;
     const end = start + pageSize;

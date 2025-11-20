@@ -22,7 +22,6 @@ const serviceSchema = new mongoose.Schema(
         "centro_salud",
         "farmacia",
         "veterinaria",
-        "minimarket",
         "supermercado",
         "hotel",
         "gimnasio",
