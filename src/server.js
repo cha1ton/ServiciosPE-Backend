@@ -14,6 +14,7 @@ import placesRoutes from './routes/places.js';
 import userRoutes from './routes/user.js';
 import reviewsRoutes from './routes/reviews.js';
 import aiRoutes from './routes/ai.js';
+import adminRoutes from './routes/adminRoutes.js';
 
 dotenv.config();
 
@@ -98,6 +99,7 @@ app.use('/api/places', placesRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/reviews', reviewsRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health
 app.get('/api/health', (req, res) => {
