@@ -31,39 +31,44 @@ export async function nearbyPlaces({ lat, lng, radius = 500, keyword = '', type 
   if (keyword) params.set('keyword', keyword);
   if (type) params.set('type', type);
 
-  // const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${params.toString()}`;
-  // const resp = await fetch(url);
-  // if (!resp.ok) return [];
-
-  // const json = await resp.json();
-
-  // aea
-
   const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&key=${PLACES_KEY}${type ? `&type=${type}` : ''}${keyword ? `&keyword=${encodeURIComponent(keyword)}` : ''}`;
 
-console.log('[PLACES][REQ]', url);
-const resp = await fetch(url);
-console.log('[PLACES][STATUS]', resp.status, resp.statusText);
-const data = await resp.json();
-console.log('[PLACES][BODY.first]', JSON.stringify(data.results?.slice(0, 3) || data, null, 2));
+  console.log('[PLACES][REQ]', url);
+  const resp = await fetch(url);
+  console.log('[PLACES][STATUS]', resp.status, resp.statusText);
+  const data = await resp.json();
+  console.log('[PLACES][BODY.first]', JSON.stringify(data.results?.slice(0, 3) || data, null, 2));
 
-if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
+  if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
 
-const items = (data.results || []).map((p) => ({
-  source: 'google',
-  placeId: p.place_id,
-  name: p.name,
-  category: (p.types && p.types[0]) || 'otros',
-  coordinates: { lat: p.geometry?.location?.lat, lng: p.geometry?.location?.lng },
-  address: { formatted: p.vicinity || '' },
-  rating: { average: p.rating || 0, count: p.user_ratings_total || 0 },
-  openNow: p.opening_hours?.open_now ?? undefined,
-  photoRef: p.photos?.[0]?.photo_reference || '',
-}));
+  const items = (data.results || []).map((p) => {
+    const photoRefs = (p.photos || [])
+      .slice(0, 3)
+      .map(ph => ph.photo_reference);
 
-// Cache 5 minutos
-setCache(key, items, 5 * 60 * 1000);
-return items;
+    console.log('[PLACES][PHOTOS]', {
+      name: p.name,
+      totalPhotos: p.photos?.length || 0,
+      usedRefs: photoRefs.length,
+    });
+
+    return {
+      source: 'google',
+      placeId: p.place_id,
+      name: p.name,
+      category: (p.types && p.types[0]) || 'otros',
+      coordinates: { lat: p.geometry?.location?.lat, lng: p.geometry?.location?.lng },
+      address: { formatted: p.vicinity || '' },
+      rating: { average: p.rating || 0, count: p.user_ratings_total || 0 },
+      openNow: p.opening_hours?.open_now ?? undefined,
+      photoRefs,
+    };
+  });
+
+
+  // Cache 5 minutos
+  setCache(key, items, 5 * 60 * 1000);
+  return items;
 
 }
 

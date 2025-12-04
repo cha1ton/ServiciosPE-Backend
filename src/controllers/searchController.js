@@ -367,10 +367,12 @@ export const searchServices = async (req, res) => {
         coordinates: g.coordinates,
         address: g.address,
         rating: g.rating,
-        contact: {}, // no exponemos phone/email de Google en Nearby
-        // ⬇️ aquí el cambio: URL directa a Google Photos API
-        image: g.photoRef ? googlePhotoUrl({ photoRef: g.photoRef, maxwidth: 400 }) : '',
-    }));
+        contact: {},
+        image: g.photoRefs?.[0]
+          ? googlePhotoUrl({ photoRef: g.photoRefs[0], maxwidth: 400 })
+          : '',
+        photoRefs: g.photoRefs || [],
+      }));
 
     // 4) Merge + dedupe
     const merged = dedupeMerge(center, locals, googleFiltered, maxDist);
