@@ -41,30 +41,19 @@ export async function nearbyPlaces({ lat, lng, radius = 500, keyword = '', type 
 
   if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
 
-  const items = (data.results || []).map((p) => {
-    const photoRefs = (p.photos || [])
+  const items = (data.results || []).map((p) => ({
+    source: 'google',
+    placeId: p.place_id,
+    name: p.name,
+    category: (p.types && p.types[0]) || 'otros',
+    coordinates: { lat: p.geometry?.location?.lat, lng: p.geometry?.location?.lng },
+    address: { formatted: p.vicinity || '' },
+    rating: { average: p.rating || 0, count: p.user_ratings_total || 0 },
+    openNow: p.opening_hours?.open_now ?? undefined,
+    photoRefs: (p.photos || [])
       .slice(0, 3)
-      .map(ph => ph.photo_reference);
-
-    console.log('[PLACES][PHOTOS]', {
-      name: p.name,
-      totalPhotos: p.photos?.length || 0,
-      usedRefs: photoRefs.length,
-    });
-
-    return {
-      source: 'google',
-      placeId: p.place_id,
-      name: p.name,
-      category: (p.types && p.types[0]) || 'otros',
-      coordinates: { lat: p.geometry?.location?.lat, lng: p.geometry?.location?.lng },
-      address: { formatted: p.vicinity || '' },
-      rating: { average: p.rating || 0, count: p.user_ratings_total || 0 },
-      openNow: p.opening_hours?.open_now ?? undefined,
-      photoRefs,
-    };
-  });
-
+      .map(ph => ph.photo_reference),
+  }));
 
   // Cache 5 minutos
   setCache(key, items, 5 * 60 * 1000);
