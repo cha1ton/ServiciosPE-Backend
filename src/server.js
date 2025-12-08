@@ -49,7 +49,7 @@ app.use(helmet.crossOriginResourcePolicy({ policy: "cross-origin" }));
 const isProd = process.env.NODE_ENV === 'production';
 const limiter = rateLimit({
   windowMs: isProd ? 15*60*1000 : 60*1000,
-  max:      isProd ? 100         : 1000,
+  max:      isProd ? 300         : 1000,
 });
 app.use(limiter);
 
