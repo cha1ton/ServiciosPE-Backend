@@ -54,7 +54,7 @@ export const createReview = async (req, res) => {
       return res.status(400).json({ success: false, message: 'La reseña no puede exceder 200 caracteres' });
     }
     if (containsBadWords(cleanComment)) {
-      return res.status(400).json({ success: false, message: 'Tu reseña contiene lenguaje ofensivo' });
+      return res.status(400).json({ success: false, message: 'Tu reseña contiene lenguaje inapropiado. Por favor edítala.' });
     }
 
     const review = await Review.create({
