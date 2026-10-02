@@ -33,7 +33,6 @@ export async function nearbyPlaces({ lat, lng, radius = 500, keyword = '', type 
 
   const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&key=${PLACES_KEY}${type ? `&type=${type}` : ''}${keyword ? `&keyword=${encodeURIComponent(keyword)}` : ''}`;
 
-  console.log('[PLACES][REQ]', url);
   const resp = await fetch(url);
   console.log('[PLACES][STATUS]', resp.status, resp.statusText);
   const data = await resp.json();
