@@ -2,7 +2,6 @@
 import fetch from 'node-fetch';
 
 const PLACES_KEY = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
-console.log('PLACES_KEY?', process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY)
 
 // Caché en memoria (clave → { data, expireAt })
 const cache = new Map();
